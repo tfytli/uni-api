@@ -29,6 +29,7 @@ from utils import (
     error_handling_wrapper,
     rate_limiter,
     provider_api_circular_list,
+    ThreadSafeCircularList,
 )
 
 from collections import defaultdict
@@ -488,6 +489,15 @@ class StatsMiddleware(BaseHTTPMiddleware):
                 model = request_model.model
                 current_info["model"] = model
 
+                final_api_key = app.state.api_list[api_index]
+                try:
+                    await app.state.user_api_keys_rate_limit[final_api_key].next(model)
+                except Exception as e:
+                    return JSONResponse(
+                        status_code=429,
+                        content={"error": "Too many requests"}
+                    )
+
                 moderated_content = None
                 if request_model.request_type == "chat":
                     moderated_content = request_model.get_last_text_message()
@@ -666,6 +676,15 @@ async def ensure_config(request: Request, call_next):
         # logger.warning("Config not found, attempting to reload")
         app.state.config, app.state.api_keys_db, app.state.api_list = await load_config(app)
 
+        if app.state.api_list:
+            app.state.user_api_keys_rate_limit = defaultdict(ThreadSafeCircularList)
+            for api_index, api_key in enumerate(app.state.api_list):
+                app.state.user_api_keys_rate_limit[api_key] = ThreadSafeCircularList(
+                    [api_key],
+                    safe_get(app.state.config, 'api_keys', api_index, "preferences", "rate_limit", default={"default": "999999/min"}),
+                    "round_robin"
+                )
+
         for item in app.state.api_keys_db:
             if item.get("role") == "admin":
                 app.state.admin_api_key = item.get("api")
@@ -734,6 +753,13 @@ async def ensure_config(request: Request, call_next):
             COOLDOWN_PERIOD = 300
 
         app.state.channel_manager = ChannelManager(cooldown_period=COOLDOWN_PERIOD)
+
+    if app and not hasattr(app.state, "error_triggers"):
+        if app.state.config and 'preferences' in app.state.config:
+            ERROR_TRIGGERS = app.state.config['preferences'].get('error_triggers', [])
+        else:
+            ERROR_TRIGGERS = []
+        app.state.error_triggers = ERROR_TRIGGERS
 
     return await call_next(request)
 
@@ -844,11 +870,11 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
         async with app.state.client_manager.get_client(timeout_value, url, proxy) as client:
             if request.stream:
                 generator = fetch_response_stream(client, url, headers, payload, engine, original_model)
-                wrapped_generator, first_response_time = await error_handling_wrapper(generator, channel_id, engine, request.stream)
+                wrapped_generator, first_response_time = await error_handling_wrapper(generator, channel_id, engine, request.stream, app.state.error_triggers)
                 response = StarletteStreamingResponse(wrapped_generator, media_type="text/event-stream")
             else:
                 generator = fetch_response(client, url, headers, payload, engine, original_model)
-                wrapped_generator, first_response_time = await error_handling_wrapper(generator, channel_id, engine, request.stream)
+                wrapped_generator, first_response_time = await error_handling_wrapper(generator, channel_id, engine, request.stream, app.state.error_triggers)
 
                 # 处理音频和其他二进制响应
                 if endpoint == "/v1/audio/speech":

@@ -92,8 +92,8 @@ providers:
     preferences:
       api_key_rate_limit: 15/min # 每个 API Key 每分钟最多请求次数，选填。默认为 999999/min。支持多个频率约束条件：15/min,10/day
       # api_key_rate_limit: # 可以为每个模型设置不同的频率限制
-      #   gemini-1.5-pro: 3/min
-      #   gemini-1.5-flash: 2/min
+      #   gemini-1.5-flash: 15/min,1500/day
+      #   gemini-1.5-pro: 2/min,50/day
       #   default: 4/min # 如果模型没有设置频率限制，使用 default 的频率限制
       api_key_cooldown_period: 60 # 每个 API Key 遭遇 429 错误后的冷却时间，单位为秒，选填。默认为 0 秒, 当设置为 0 秒时，不启用冷却机制。当存在多个 API key 时才会生效。
       api_key_schedule_algorithm: round_robin # 设置多个 API Key 的请求顺序，选填。默认为 round_robin，可选值有：round_robin，random。当存在多个 API key 时才会生效。round_robin 是轮询负载均衡，random 是随机负载均衡。
@@ -110,6 +110,7 @@ providers:
     model:
       - gemini-1.5-pro
       - gemini-1.5-flash
+      - gemini-1.5-pro: gemini-1.5-pro-search # 仅支持在 vertex Gemini API 中，以 -search 后缀重命名模型后，使用 gemini-1.5-pro-search 模型请求 uni-api 时，表示 gemini-1.5-pro 模型自动使用 Google 官方搜索工具。
       - claude-3-5-sonnet@20240620: claude-3-5-sonnet
       - claude-3-opus@20240229: claude-3-opus
       - claude-3-sonnet@20240229: claude-3-sonnet
@@ -151,8 +152,11 @@ api_keys:
       # 当 SCHEDULING_ALGORITHM 为 random 时，使用随机轮训负载均衡，随机请求拥有请求的模型的渠道。
       # 当 SCHEDULING_ALGORITHM 为 round_robin 时，使用轮训负载均衡，按照顺序请求用户使用的模型的渠道。
       AUTO_RETRY: true # 是否自动重试，自动重试下一个提供商，true 为自动重试，false 为不自动重试，默认为 true。也可以设置为数字，表示重试次数。
-      RATE_LIMIT: 2/min # 支持限流，每分钟最多请求次数，可以设置为整数，如 2/min，2 次每分钟、5/hour，5 次每小时、10/day，10 次每天，10/month，10 次每月，10/year，10 次每年。默认60/min，选填
-      # RATE_LIMIT: 2/min,10/day 支持多个频率约束条件
+      rate_limit: 15/min # 支持限流，每分钟最多请求次数，可以设置为整数，如 2/min，2 次每分钟、5/hour，5 次每小时、10/day，10 次每天，10/month，10 次每月，10/year，10 次每年。默认999999/min，选填。支持多个频率约束条件：15/min,10/day
+      # rate_limit: # 可以为每个模型设置不同的频率限制
+      #   gemini-1.5-flash: 15/min,1500/day
+      #   gemini-1.5-pro: 2/min,50/day
+      #   default: 4/min # 如果模型没有设置频率限制，使用 default 的频率限制
       ENABLE_MODERATION: true # 是否开启消息道德审查，true 为开启，false 为不开启，默认为 false，当开启后，会对用户的消息进行道德审查，如果发现不当的消息，会返回错误信息。
 
   # 渠道级加权负载均衡配置示例
@@ -174,6 +178,9 @@ preferences: # 全局配置
     o1-mini: 30 # 模型 o1-mini 的超时时间为 30 秒，当请求名字是 o1-mini 开头的模型时，超时时间是 30 秒
     o1-preview: 100 # 模型 o1-preview 的超时时间为 100 秒，当请求名字是 o1-preview 开头的模型时，超时时间是 100 秒
   cooldown_period: 300 # 渠道冷却时间，单位为秒，默认 300 秒，选填。当模型请求失败时，会自动将该渠道排除冷却一段时间，不再请求该渠道，冷却时间结束后，会自动将该模型恢复，直到再次请求失败，会重新冷却。当 cooldown_period 设置为 0 时，不启用冷却机制。
+  error_triggers: # 错误触发器，当模型返回的消息包含错误触发器中的任意一个字符串时，该渠道会自动返回报错。选填
+    - The bot's usage is covered by the developer
+    - process this request due to overload or policy
 ```
 
 挂载配置文件并启动 uni-api docker 容器：

@@ -92,8 +92,8 @@ providers:
     preferences:
       api_key_rate_limit: 15/min # Each API Key can request up to 15 times per minute, optional. The default is 999999/min. Supports multiple frequency constraints: 15/min,10/day
       # api_key_rate_limit: # You can set different frequency limits for each model
-      #   gemini-1.5-pro: 3/min
-      #   gemini-1.5-flash: 2/min
+      #   gemini-1.5-flash: 15/min,1500/day
+      #   gemini-1.5-pro: 2/min,50/day
       #   default: 4/min # If the model does not set the frequency limit, use the frequency limit of default
       api_key_cooldown_period: 60 # Each API Key will be cooled down for 60 seconds after encountering a 429 error. Optional, the default is 0 seconds. When set to 0, the cooling mechanism is not enabled. When there are multiple API keys, the cooling mechanism will take effect.
       api_key_schedule_algorithm: round_robin # Set the request order of multiple API Keys, optional. The default is round_robin, and the optional values are: round_robin, random. It will take effect when there are multiple API keys. round_robin is polling load balancing, and random is random load balancing.
@@ -110,6 +110,7 @@ providers:
     model:
       - gemini-1.5-pro
       - gemini-1.5-flash
+      - gemini-1.5-pro: gemini-1.5-pro-search # Only supports using the gemini-1.5-pro-search model to request uni-api when using the Vertex Gemini API, to automatically use the Google official search tool.
       - claude-3-5-sonnet@20240620: claude-3-5-sonnet
       - claude-3-opus@20240229: claude-3-opus
       - claude-3-sonnet@20240229: claude-3-sonnet
@@ -151,8 +152,11 @@ api_keys:
       # When SCHEDULING_ALGORITHM is random, use random polling load balancing, randomly request the channel of the model with a request.
       # When SCHEDULING_ALGORITHM is round_robin, use polling load balancing, request the channel of the model used by the user in order.
       AUTO_RETRY: true # Whether to automatically retry, automatically retry the next provider, true for automatic retry, false for no automatic retry, default is true. Also supports setting a number, indicating the number of retries.
-      RATE_LIMIT: 2/min # Supports rate limiting, maximum number of requests per minute, can be set to an integer, such as 2/min, 2 times per minute, 5/hour, 5 times per hour, 10/day, 10 times per day, 10/month, 10 times per month, 10/year, 10 times per year. Default is 60/min, optional
-      # RATE_LIMIT: 2/min,10/day # Supports multiple frequency constraints
+      rate_limit: 15/min # Supports rate limiting, each API Key can request up to 15 times per minute, optional. The default is 999999/min. Supports multiple frequency constraints: 15/min,10/day
+      # rate_limit: # You can set different frequency limits for each model
+      #   gemini-1.5-flash: 15/min,1500/day
+      #   gemini-1.5-pro: 2/min,50/day
+      #   default: 4/min # If the model does not set the frequency limit, use the frequency limit of default
       ENABLE_MODERATION: true # Whether to enable message moderation, true for enable, false for disable, default is false, when enabled, it will moderate the user's message, if inappropriate messages are found, an error message will be returned.
 
   # Channel-level weighted load balancing configuration example
@@ -174,6 +178,9 @@ preferences: # Global configuration
     o1-mini: 30 # Model o1-mini timeout is 30 seconds, when requesting models starting with o1-mini, the timeout is 30 seconds
     o1-preview: 100 # Model o1-preview timeout is 100 seconds, when requesting models starting with o1-preview, the timeout is 100 seconds
   cooldown_period: 300 # Channel cooldown time, in seconds, default 300 seconds, optional. When a model request fails, the channel will be automatically excluded and cooled down for a period of time, and will not request the channel again. After the cooldown time ends, the model will be automatically restored until the request fails again, and it will be cooled down again. When cooldown_period is set to 0, the cooling mechanism is not enabled.
+  error_triggers: # Error triggers, when the message returned by the model contains any of the strings in the error_triggers, the channel will return an error. Optional
+    - The bot's usage is covered by the developer
+    - process this request due to overload or policy
 ```
 
 Mount the configuration file and start the uni-api docker container:

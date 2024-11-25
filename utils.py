@@ -67,7 +67,7 @@ async def get_user_rate_limit(app, api_index: int = None):
     # 这里应该实现根据 token 获取用户速率限制的逻辑
     # 示例： 返回 (次数， 秒数)
     config = app.state.config
-    raw_rate_limit = safe_get(config, 'api_keys', api_index, "preferences", "RATE_LIMIT")
+    raw_rate_limit = safe_get(config, 'api_keys', api_index, "preferences", "rate_limit")
     # print("raw_rate_limit", raw_rate_limit)
     # print("not api_index or not raw_rate_limit", api_index == None, not raw_rate_limit, api_index == None or not raw_rate_limit, api_index, raw_rate_limit)
 
@@ -436,7 +436,7 @@ def identify_audio_format(file_bytes):
 
 import asyncio
 import time as time_module
-async def error_handling_wrapper(generator, channel_id, engine, stream):
+async def error_handling_wrapper(generator, channel_id, engine, stream, error_triggers):
     start_time = time_module.time()
     try:
         first_item = await generator.__anext__()
@@ -454,10 +454,7 @@ async def error_handling_wrapper(generator, channel_id, engine, stream):
             if first_item_str.startswith("[DONE]"):
                 logger.error(f"provider: {channel_id:<11} error_handling_wrapper [DONE]!")
                 raise StopAsyncIteration
-            if "The bot's usage is covered by the developer" in first_item_str:
-                logger.error(f"provider: {channel_id:<11} error const string: %s", first_item_str)
-                raise StopAsyncIteration
-            if "process this request due to overload or policy" in first_item_str:
+            if any(x in first_item_str for x in error_triggers):
                 logger.error(f"provider: {channel_id:<11} error const string: %s", first_item_str)
                 raise StopAsyncIteration
             try:
