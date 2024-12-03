@@ -70,12 +70,17 @@ class ThreadSafeCircularList:
         if schedule_algorithm == "random":
             import random
             self.items = random.sample(items, len(items))
+            self.schedule_algorithm = "random"
         elif schedule_algorithm == "round_robin":
             self.items = items
+            self.schedule_algorithm = "round_robin"
+        elif schedule_algorithm == "fixed_priority":
+            self.items = items
+            self.schedule_algorithm = "fixed_priority"
         else:
             self.items = items
-            logger.warning(f"Unknown schedule algorithm: {schedule_algorithm}, use (round_robin, random) instead")
-
+            logger.warning(f"Unknown schedule algorithm: {schedule_algorithm}, use (round_robin, random, fixed_priority) instead")
+            self.schedule_algorithm = "round_robin"
         self.index = 0
         self.lock = asyncio.Lock()
         # 修改为二级字典，第一级是item，第二级是model
@@ -152,6 +157,8 @@ class ThreadSafeCircularList:
 
     async def next(self, model: str = None):
         async with self.lock:
+            if self.schedule_algorithm == "fixed_priority":
+                self.index = 0
             start_index = self.index
             while True:
                 item = self.items[self.index]
@@ -455,12 +462,17 @@ async def error_handling_wrapper(generator, channel_id, engine, stream, error_tr
             raise HTTPException(status_code=status_code, detail=f"{detail}"[:300])
 
         if isinstance(first_item_str, dict) and engine not in ["tts", "embedding", "dalle", "moderation", "whisper"] and stream == False:
+            if any(x in str(first_item_str) for x in error_triggers):
+                logger.error(f"provider: {channel_id:<11} error const string: %s", first_item_str)
+                raise StopAsyncIteration
             content = safe_get(first_item_str, "choices", 0, "message", "content", default=None)
             if content == "" or content is None:
                 raise StopAsyncIteration
 
         # 如果不是错误，创建一个新的生成器，首先yield第一个项，然后yield剩余的项
         async def new_generator():
+            # print("type(first_item)", type(first_item))
+            # print("first_item", ensure_string(first_item))
             yield ensure_string(first_item)
             try:
                 async for item in generator:
@@ -479,7 +491,7 @@ async def error_handling_wrapper(generator, channel_id, engine, stream, error_tr
     except StopAsyncIteration:
         raise HTTPException(status_code=400, detail="data: {'error': 'No data returned'}")
 
-def post_all_models(api_index, config):
+def post_all_models(api_index, config, api_list, models_list):
     all_models = []
     unique_models = set()
 
@@ -493,11 +505,8 @@ def post_all_models(api_index, config):
                 provider = model.split("/")[0]
                 model = model.split("/")[1]
                 if model == "*":
-                    for provider_item in config["providers"]:
-                        if provider_item['provider'] != provider:
-                            continue
-                        model_dict = get_model_dict(provider_item)
-                        for model_item in model_dict.keys():
+                    if provider.startswith("sk-") and provider in api_list:
+                        for model_item in models_list[provider]:
                             if model_item not in unique_models:
                                 unique_models.add(model_item)
                                 model_info = {
@@ -505,24 +514,53 @@ def post_all_models(api_index, config):
                                     "object": "model",
                                     "created": 1720524448858,
                                     "owned_by": "uni-api"
-                                    # "owned_by": provider_item['provider']
                                 }
                                 all_models.append(model_info)
+                    else:
+                        for provider_item in config["providers"]:
+                            if provider_item['provider'] != provider:
+                                continue
+                            model_dict = get_model_dict(provider_item)
+                            for model_item in model_dict.keys():
+                                if model_item not in unique_models:
+                                    unique_models.add(model_item)
+                                    model_info = {
+                                        "id": model_item,
+                                        "object": "model",
+                                        "created": 1720524448858,
+                                        "owned_by": "uni-api"
+                                        # "owned_by": provider_item['provider']
+                                    }
+                                    all_models.append(model_info)
                 else:
-                    for provider_item in config["providers"]:
-                        if provider_item['provider'] != provider:
-                            continue
-                        model_dict = get_model_dict(provider_item)
-                        for model_item in model_dict.keys() :
-                            if model_item not in unique_models and model_item == model:
-                                unique_models.add(model_item)
-                                model_info = {
-                                    "id": model_item,
-                                    "object": "model",
-                                    "created": 1720524448858,
-                                    "owned_by": "uni-api"
-                                }
-                                all_models.append(model_info)
+                    if provider.startswith("sk-") and provider in api_list:
+                        if model in models_list[provider] and model not in unique_models:
+                            unique_models.add(model)
+                            model_info = {
+                                "id": model,
+                                "object": "model",
+                                "created": 1720524448858,
+                                "owned_by": "uni-api"
+                            }
+                            all_models.append(model_info)
+                    else:
+                        for provider_item in config["providers"]:
+                            if provider_item['provider'] != provider:
+                                continue
+                            model_dict = get_model_dict(provider_item)
+                            for model_item in model_dict.keys():
+                                if model_item not in unique_models and model_item == model:
+                                    unique_models.add(model_item)
+                                    model_info = {
+                                        "id": model_item,
+                                        "object": "model",
+                                        "created": 1720524448858,
+                                        "owned_by": "uni-api"
+                                    }
+                                    all_models.append(model_info)
+                continue
+
+            if model.startswith("sk-") and model in api_list:
                 continue
 
             if model not in unique_models:
@@ -616,3 +654,80 @@ def safe_get(data, *keys, default=None):
         except (KeyError, IndexError, AttributeError, TypeError):
             return default
     return data
+
+
+# end_of_line = "\n\r\n"
+# end_of_line = "\r\n"
+# end_of_line = "\n\r"
+end_of_line = "\n\n"
+# end_of_line = "\r"
+# end_of_line = "\n"
+
+import random
+import string
+async def generate_sse_response(timestamp, model, content=None, tools_id=None, function_call_name=None, function_call_content=None, role=None, total_tokens=0, prompt_tokens=0, completion_tokens=0):
+    random.seed(timestamp)
+    random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=29))
+    sample_data = {
+        "id": f"chatcmpl-{random_str}",
+        "object": "chat.completion.chunk",
+        "created": timestamp,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": content},
+                "logprobs": None,
+                "finish_reason": None
+            }
+        ],
+        "usage": None,
+        "system_fingerprint": "fp_d576307f90",
+    }
+    if function_call_content:
+        sample_data["choices"][0]["delta"] = {"tool_calls":[{"index":0,"function":{"arguments": function_call_content}}]}
+    if tools_id and function_call_name:
+        sample_data["choices"][0]["delta"] = {"tool_calls":[{"index":0,"id": tools_id,"type":"function","function":{"name": function_call_name, "arguments":""}}]}
+        # sample_data["choices"][0]["delta"] = {"tool_calls":[{"index":0,"function":{"id": tools_id, "name": function_call_name}}]}
+    if role:
+        sample_data["choices"][0]["delta"] = {"role": role, "content": ""}
+    if total_tokens:
+        total_tokens = prompt_tokens + completion_tokens
+        sample_data["usage"] = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens}
+        sample_data["choices"] = []
+    json_data = json.dumps(sample_data, ensure_ascii=False)
+
+    # 构建SSE响应
+    sse_response = f"data: {json_data}" + end_of_line
+
+    return sse_response
+
+async def generate_no_stream_response(timestamp, model, content=None, tools_id=None, function_call_name=None, function_call_content=None, role=None, total_tokens=0, prompt_tokens=0, completion_tokens=0):
+    random.seed(timestamp)
+    random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=29))
+    sample_data = {
+        "id": f"chatcmpl-{random_str}",
+        "object": "chat.completion",
+        "created": timestamp,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": role,
+                    "content": content,
+                    "refusal": None
+                },
+                "logprobs": None,
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": None,
+        "system_fingerprint": "fp_a7d06e42a7"
+    }
+    if total_tokens:
+        total_tokens = prompt_tokens + completion_tokens
+        sample_data["usage"] = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens}
+    json_data = json.dumps(sample_data, ensure_ascii=False)
+
+    return json_data

@@ -4,6 +4,8 @@ import json
 import httpx
 import base64
 import urllib.parse
+from PIL import Image
+import io
 
 from models import RequestModel
 from utils import c35s, c3s, c3o, c3h, gem, BaseAPI, get_model_dict, provider_api_circular_list, safe_get
@@ -78,7 +80,25 @@ async def get_image_message(base64_image, engine = None):
     semicolon_index = base64_image.index(";")
     image_type = base64_image[colon_index + 1:semicolon_index]
 
-    if "gpt" == engine:
+    if image_type == "image/webp":
+        # 将webp转换为png
+
+        # 解码base64获取图片数据
+        image_data = base64.b64decode(base64_image.split(",")[1])
+
+        # 使用PIL打开webp图片
+        image = Image.open(io.BytesIO(image_data))
+
+        # 转换为PNG格式
+        png_buffer = io.BytesIO()
+        image.save(png_buffer, format="PNG")
+        png_base64 = base64.b64encode(png_buffer.getvalue()).decode('utf-8')
+
+        # 返回PNG格式的base64
+        base64_image = f"data:image/png;base64,{png_base64}"
+        image_type = "image/png"
+
+    if "gpt" == engine or "openrouter" == engine:
         return {
             "type": "image_url",
             "image_url": {
@@ -618,7 +638,14 @@ async def get_gpt_payload(request, engine, provider):
     model_dict = get_model_dict(provider)
     model = model_dict[request.model]
     if provider.get("api"):
-        headers['Authorization'] = f"Bearer {await provider_api_circular_list[provider['provider']].next(model)}"
+        if provider['base_url'] == "https://api-ext.felo.ai/one-ai/completions" or provider['base_url'] == "https://api-ext.felo.ai/trail/v1/chat/completions":
+            headers['Authorization'] = f"{await provider_api_circular_list[provider['provider']].next(model)}"
+        else:
+            headers['Authorization'] = f"Bearer {await provider_api_circular_list[provider['provider']].next(model)}"
+
+    elif provider['provider'].startswith("sk-"):
+        headers['Authorization'] = f"Bearer {provider['provider']}"
+
     url = provider['base_url']
 
     messages = []
@@ -665,16 +692,23 @@ async def get_gpt_payload(request, engine, provider):
 
     miss_fields = [
         'model',
-        'messages'
+        'messages',
     ]
 
     for field, value in request.model_dump(exclude_unset=True).items():
         if field not in miss_fields and value is not None:
-            payload[field] = value
+            if field == "max_tokens" and "o1" in model:
+                payload["max_completion_tokens"] = value
+            else:
+                payload[field] = value
 
-    if provider.get("tools") == False:
+    if provider.get("tools") == False or "o1" in model or "chatgpt-4o-latest" in model or "grok" in model:
         payload.pop("tools", None)
         payload.pop("tool_choice", None)
+    if "o1" in model and "models.inference.ai.azure.com" in url:
+        payload["stream"] = False
+        # request.stream = False
+        payload.pop("stream_options", None)
 
     return url, headers, payload
 
@@ -837,63 +871,6 @@ async def get_cloudflare_payload(request, engine, provider):
 
     payload = {
         "prompt": content,
-    }
-
-    miss_fields = [
-        'model',
-        'messages',
-        'tools',
-        'tool_choice',
-        'temperature',
-        'top_p',
-        'max_tokens',
-        'presence_penalty',
-        'frequency_penalty',
-        'n',
-        'user',
-        'include_usage',
-        'logprobs',
-        'top_logprobs'
-    ]
-
-    for field, value in request.model_dump(exclude_unset=True).items():
-        if field not in miss_fields and value is not None:
-            payload[field] = value
-
-    return url, headers, payload
-
-async def get_o1_payload(request, engine, provider):
-    headers = {
-        'Content-Type': 'application/json'
-    }
-    model_dict = get_model_dict(provider)
-    model = model_dict[request.model]
-    if provider.get("api"):
-        headers['Authorization'] = f"Bearer {await provider_api_circular_list[provider['provider']].next(model)}"
-
-    url = provider['base_url']
-
-    messages = []
-    for msg in request.messages:
-        if isinstance(msg.content, list):
-            content = []
-            for item in msg.content:
-                if item.type == "text":
-                    text_message = await get_text_message(msg.role, item.text, engine)
-                    content.append(text_message)
-        else:
-            content = msg.content
-
-        if isinstance(content, list) and msg.role != "system":
-            for item in content:
-                if item["type"] == "text":
-                    messages.append({"role": msg.role, "content": item["text"]})
-        elif msg.role != "system":
-            messages.append({"role": msg.role, "content": content})
-
-    payload = {
-        "model": model,
-        "messages": messages,
     }
 
     miss_fields = [
@@ -1094,6 +1071,7 @@ async def get_dalle_payload(request, engine, provider):
         "model": model,
         "prompt": request.prompt,
         "n": request.n,
+        "response_format": request.response_format,
         "size": request.size
     }
 
@@ -1206,8 +1184,6 @@ async def get_payload(request: RequestModel, engine, provider):
         return await get_openrouter_payload(request, engine, provider)
     elif engine == "cloudflare":
         return await get_cloudflare_payload(request, engine, provider)
-    elif engine == "o1":
-        return await get_o1_payload(request, engine, provider)
     elif engine == "cohere":
         return await get_cohere_payload(request, engine, provider)
     elif engine == "dalle":

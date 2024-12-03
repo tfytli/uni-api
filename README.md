@@ -96,7 +96,7 @@ providers:
       #   gemini-1.5-pro: 2/min,50/day
       #   default: 4/min # If the model does not set the frequency limit, use the frequency limit of default
       api_key_cooldown_period: 60 # Each API Key will be cooled down for 60 seconds after encountering a 429 error. Optional, the default is 0 seconds. When set to 0, the cooling mechanism is not enabled. When there are multiple API keys, the cooling mechanism will take effect.
-      api_key_schedule_algorithm: round_robin # Set the request order of multiple API Keys, optional. The default is round_robin, and the optional values are: round_robin, random. It will take effect when there are multiple API keys. round_robin is polling load balancing, and random is random load balancing.
+      api_key_schedule_algorithm: round_robin # Set the request order of multiple API Keys, optional. The default is round_robin, and the optional values are: round_robin, random, fixed_priority. It will take effect when there are multiple API keys. round_robin is polling load balancing, and random is random load balancing. fixed_priority is fixed priority scheduling, always use the first available API key.
       model_timeout: # Model timeout, in seconds, default 100 seconds, optional
         gemini-1.5-pro: 10 # Model gemini-1.5-pro timeout is 10 seconds
         gemini-1.5-flash: 10 # Model gemini-1.5-flash timeout is 10 seconds
@@ -147,6 +147,7 @@ api_keys:
       - anthropic/claude-3-5-sonnet # Usable model name, can only use the claude-3-5-sonnet model provided by the provider named anthropic. Models with the same name from other providers cannot be used. This syntax will not match the model named anthropic/claude-3-5-sonnet provided by other-provider.
       - <anthropic/claude-3-5-sonnet> # By adding angle brackets on both sides of the model name, it will not search for the claude-3-5-sonnet model under the channel named anthropic, but will take the entire anthropic/claude-3-5-sonnet as the model name. This syntax can match the model named anthropic/claude-3-5-sonnet provided by other-provider. But it will not match the claude-3-5-sonnet model under anthropic.
       - openai-test/text-moderation-latest # When message moderation is enabled, the text-moderation-latest model under the channel named openai-test can be used for moderation.
+      - sk-KjjI60Yd0JFWtxxxxxxxxxxxxxxwmRWpWpQRo/* # Support using other API keys as channels
     preferences:
       SCHEDULING_ALGORITHM: fixed_priority # When SCHEDULING_ALGORITHM is fixed_priority, use fixed priority scheduling, always execute the channel of the first model with a request. Default is enabled, SCHEDULING_ALGORITHM default value is fixed_priority. SCHEDULING_ALGORITHM optional values are: fixed_priority, round_robin, weighted_round_robin, lottery, random.
       # When SCHEDULING_ALGORITHM is random, use random polling load balancing, randomly request the channel of the model with a request.
@@ -372,8 +373,8 @@ pex -r requirements.txt \
 ## Sponsors
 
 We thank the following sponsors for their support:
-<!-- ¥1000 -->
-- @PowerHunter: ¥1800
+<!-- ¥2050 -->
+- @PowerHunter: ¥2000
 - @ioi：¥50
 
 ## How to sponsor us
@@ -433,7 +434,7 @@ All scheduling algorithms need to be enabled by setting api_keys.(api).preferenc
 
 - How should the base_url be filled in correctly?
 
-Except for some special channels shown in the advanced configuration, all OpenAI format providers need to fill in the base_url completely, which means the base_url must end with /v1/chat/completions. If you are using GitHub models, the base_url should be filled in as https://models.inference.ai.azure.com/chat/completion, not Azure's URL.
+Except for some special channels shown in the advanced configuration, all OpenAI format providers need to fill in the base_url completely, which means the base_url must end with /v1/chat/completions. If you are using GitHub models, the base_url should be filled in as https://models.inference.ai.azure.com/chat/completions, not Azure's URL.
 
 - How does the model timeout time work? What is the priority of the channel-level timeout setting and the global model timeout setting?
 

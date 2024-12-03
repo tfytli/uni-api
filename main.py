@@ -450,6 +450,11 @@ class StatsMiddleware(BaseHTTPMiddleware):
 
             if api_index is not None:
                 enable_moderation = safe_get(config, 'api_keys', api_index, "preferences", "ENABLE_MODERATION", default=False)
+            else:
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "Invalid or missing API Key"}
+                )
         else:
             # 如果token为None，检查全局设置
             enable_moderation = config.get('ENABLE_MODERATION', False)
@@ -643,6 +648,7 @@ class ClientManager:
                         proxy = proxy.replace('socks5h://', 'socks5://')
                         transport = AsyncProxyTransport.from_url(proxy)
                         client_config["transport"] = transport
+                        # print("proxy", proxy)
                     except ImportError:
                         logger.error("httpx-socks package is required for SOCKS proxy support")
                         raise ImportError("Please install httpx-socks package for SOCKS proxy support: pip install httpx-socks")
@@ -707,7 +713,7 @@ async def ensure_config(request: Request, call_next):
 
         default_config = {
             "headers": {
-                "User-Agent": "curl/7.68.0",
+                "User-Agent": "OpenAI/Python 1.55.3",
                 "Accept": "*/*",
             },
             "http2": True,
@@ -760,6 +766,36 @@ async def ensure_config(request: Request, call_next):
             ERROR_TRIGGERS = []
         app.state.error_triggers = ERROR_TRIGGERS
 
+    if app and app.state.api_keys_db and not hasattr(app.state, "models_list"):
+        app.state.models_list = {}
+        for item in app.state.api_keys_db:
+            api_key_model_list = item.get("model", [])
+            for provider_rule in api_key_model_list:
+                provider_name = provider_rule.split("/")[0]
+                if provider_name.startswith("sk-") and provider_name in app.state.api_list:
+                    models_list = []
+                    try:
+                        # 构建请求头
+                        headers = {
+                            "Authorization": f"Bearer {provider_name}"
+                        }
+                        # 发送GET请求获取模型列表
+                        base_url = "http://127.0.0.1:8000/v1/models"
+                        async with app.state.client_manager.get_client(1, base_url) as client:
+                            response = await client.get(
+                                base_url,
+                                headers=headers
+                            )
+                            if response.status_code == 200:
+                                models_data = response.json()
+                                # 将获取到的模型添加到models_list
+                                for model in models_data.get("data", []):
+                                    models_list.append(model["id"])
+                    except Exception as e:
+                        if str(e):
+                            logger.error(f"获取模型列表失败: {str(e)}")
+                    app.state.models_list[provider_name] = models_list
+
     return await call_next(request)
 
 def get_timeout_value(provider_timeouts, original_model):
@@ -778,7 +814,7 @@ def get_timeout_value(provider_timeouts, original_model):
     return timeout_value
 
 # 在 process_request 函数中更新成功和失败计数
-async def process_request(request: Union[RequestModel, ImageGenerationRequest, AudioTranscriptionRequest, ModerationRequest, EmbeddingRequest], provider: Dict, endpoint=None):
+async def process_request(request: Union[RequestModel, ImageGenerationRequest, AudioTranscriptionRequest, ModerationRequest, EmbeddingRequest], provider: Dict, endpoint=None, role=None):
     url = provider['base_url']
     parsed_url = urlparse(url)
     # print("parsed_url", parsed_url)
@@ -791,8 +827,6 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
         engine = "cloudflare"
     elif parsed_url.netloc == 'api.anthropic.com' or parsed_url.path.endswith("v1/messages"):
         engine = "claude"
-    elif parsed_url.netloc == 'openrouter.ai':
-        engine = "openrouter"
     elif parsed_url.netloc == 'api.cohere.com':
         engine = "cohere"
         request.stream = True
@@ -804,7 +838,10 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
 
     if "claude" not in original_model \
     and "gpt" not in original_model \
+    and "o1" not in original_model \
     and "gemini" not in original_model \
+    and "grok" not in original_model \
+    and "doubao" not in original_model.lower() \
     and parsed_url.netloc != 'api.cloudflare.com' \
     and parsed_url.netloc != 'api.cohere.com':
         engine = "openrouter"
@@ -814,10 +851,6 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
 
     if "gemini" in original_model and engine == "vertex":
         engine = "vertex-gemini"
-
-    if "o1-preview" in original_model or "o1-mini" in original_model:
-        engine = "o1"
-        request.stream = False
 
     if endpoint == "/v1/images/generations":
         engine = "dalle"
@@ -842,9 +875,11 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
         engine = provider["engine"]
 
     channel_id = f"{provider['provider']}"
-    logger.info(f"provider: {channel_id:<11} model: {request.model:<22} engine: {engine}")
+    if engine != "moderation":
+        logger.info(f"provider: {channel_id:<11} model: {request.model:<22} engine: {engine} role: {role}")
 
     url, headers, payload = await get_payload(request, engine, provider)
+    # print("url", url)
     if is_debug:
         logger.info(json.dumps(headers, indent=4, ensure_ascii=False))
         if payload.get("file"):
@@ -934,7 +969,7 @@ def lottery_scheduling(weights):
                 break
     return selections
 
-def get_provider_rules(model_rule, config, request_model):
+async def get_provider_rules(model_rule, config, request_model):
     provider_rules = []
     if model_rule == "all":
         # 如模型名为 all，则返回所有模型
@@ -955,10 +990,19 @@ def get_provider_rules(model_rule, config, request_model):
             provider_name = model_rule.split("/")[0]
             model_name_split = "/".join(model_rule.split("/")[1:])
             models_list = []
-            for provider in config['providers']:
-                model_dict = get_model_dict(provider)
-                if provider['provider'] == provider_name:
-                    models_list.extend(list(model_dict.keys()))
+
+            # api_keys 中 api 为 sk- 时，表示继承 api_keys，将 api_keys 中的 api key 当作 渠道
+            if provider_name.startswith("sk-") and provider_name in app.state.api_list:
+                if app.state.models_list.get(provider_name):
+                    models_list = app.state.models_list[provider_name]
+                else:
+                    models_list = []
+            else:
+                for provider in config['providers']:
+                    model_dict = get_model_dict(provider)
+                    if provider['provider'] == provider_name:
+                        models_list.extend(list(model_dict.keys()))
+
             # print("models_list", models_list)
             # print("model_name", model_name)
             # print("model_name_split", model_name_split)
@@ -992,29 +1036,33 @@ def get_provider_list(provider_rules, config, request_model):
     provider_list = []
     # print("provider_rules", provider_rules)
     for item in provider_rules:
-        for provider in config['providers']:
-            model_dict = get_model_dict(provider)
-            model_name_split = "/".join(item.split("/")[1:])
-            if "/" in item and provider['provider'] == item.split("/")[0] and model_name_split in model_dict.keys():
-                new_provider = copy.deepcopy(provider)
-                # old: new
-                # print("item", item)
-                # print("model_dict", model_dict)
-                # print("model_name_split", model_name_split)
-                # print("request_model", request_model)
-                new_provider["model"] = [{model_dict[model_name_split]: request_model}]
-                if request_model in model_dict.keys() and model_name_split == request_model:
-                    provider_list.append(new_provider)
+        provider_name = item.split("/")[0]
+        if provider_name.startswith("sk-") and provider_name in app.state.api_list:
+            provider_list.append({"provider": provider_name, "base_url": "http://127.0.0.1:8000/v1/chat/completions", "model": [{request_model: request_model}], "tools": True})
+        else:
+            for provider in config['providers']:
+                model_dict = get_model_dict(provider)
+                model_name_split = "/".join(item.split("/")[1:])
+                if "/" in item and provider['provider'] == provider_name and model_name_split in model_dict.keys():
+                    new_provider = copy.deepcopy(provider)
+                    # old: new
+                    # print("item", item)
+                    # print("model_dict", model_dict)
+                    # print("model_name_split", model_name_split)
+                    # print("request_model", request_model)
+                    new_provider["model"] = [{model_dict[model_name_split]: request_model}]
+                    if request_model in model_dict.keys() and model_name_split == request_model:
+                        provider_list.append(new_provider)
 
-                elif request_model.endswith("*") and model_name_split.startswith(request_model.rstrip("*")):
-                    provider_list.append(new_provider)
+                    elif request_model.endswith("*") and model_name_split.startswith(request_model.rstrip("*")):
+                        provider_list.append(new_provider)
     return provider_list
 
-def get_matching_providers(request_model, config, api_index):
+async def get_matching_providers(request_model, config, api_index):
     provider_rules = []
 
     for model_rule in config['api_keys'][api_index]['model']:
-        provider_rules.extend(get_provider_rules(model_rule, config, request_model))
+        provider_rules.extend(await get_provider_rules(model_rule, config, request_model))
 
     provider_list = get_provider_list(provider_rules, config, request_model)
 
@@ -1022,7 +1070,7 @@ def get_matching_providers(request_model, config, api_index):
     return provider_list
 
 async def get_right_order_providers(request_model, config, api_index, scheduling_algorithm):
-    matching_providers = get_matching_providers(request_model, config, api_index)
+    matching_providers = await get_matching_providers(request_model, config, api_index)
 
     if not matching_providers:
         raise HTTPException(status_code=404, detail=f"No matching model found: {request_model}")
@@ -1046,7 +1094,7 @@ async def get_right_order_providers(request_model, config, api_index, scheduling
             weight_keys = set(weights.keys())
             provider_rules = []
             for model_rule in weight_keys:
-                provider_rules.extend(get_provider_rules(model_rule, config, request_model))
+                provider_rules.extend(await get_provider_rules(model_rule, config, request_model))
             provider_list = get_provider_list(provider_rules, config, request_model)
             weight_keys = set([provider['provider'] + "/" + request_model for provider in provider_list])
             # print("all_providers", all_providers)
@@ -1111,6 +1159,7 @@ class ModelRequestHandler:
                 start_index = self.last_provider_indices[request_model]
 
         auto_retry = safe_get(config, 'api_keys', api_index, "preferences", "AUTO_RETRY", default=True)
+        role = safe_get(config, 'api_keys', api_index, "role", default=safe_get(config, 'api_keys', api_index, "api", default="None")[:8])
 
         index = 0
         if num_matching_providers == 1 and (count := provider_api_circular_list[matching_providers[0]['provider']].get_items_count()) > 1:
@@ -1129,7 +1178,7 @@ class ModelRequestHandler:
             index += 1
             provider = matching_providers[current_index]
             try:
-                response = await process_request(request, provider, endpoint)
+                response = await process_request(request, provider, endpoint, role)
                 return response
             except (Exception, HTTPException, asyncio.CancelledError, httpx.ReadError, httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectError) as e:
 
@@ -1238,7 +1287,7 @@ async def options_handler():
 
 @app.get("/v1/models")
 async def list_models(api_index: int = Depends(verify_api_key)):
-    models = post_all_models(api_index, app.state.config)
+    models = post_all_models(api_index, app.state.config, app.state.api_list, app.state.models_list)
     return JSONResponse(content={
         "object": "list",
         "data": models
@@ -2088,6 +2137,10 @@ app.include_router(frontend_router, tags=["frontend"])
 # async def on_fetch(request, env):
 #     import asgi
 #     return await asgi.fetch(app, request, env)
+
+from fastapi.staticfiles import StaticFiles
+# 添加静态文件挂载
+app.mount("/", StaticFiles(directory="./static", html=True), name="static")
 
 if __name__ == '__main__':
     import uvicorn

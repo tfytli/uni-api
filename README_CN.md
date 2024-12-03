@@ -96,7 +96,7 @@ providers:
       #   gemini-1.5-pro: 2/min,50/day
       #   default: 4/min # 如果模型没有设置频率限制，使用 default 的频率限制
       api_key_cooldown_period: 60 # 每个 API Key 遭遇 429 错误后的冷却时间，单位为秒，选填。默认为 0 秒, 当设置为 0 秒时，不启用冷却机制。当存在多个 API key 时才会生效。
-      api_key_schedule_algorithm: round_robin # 设置多个 API Key 的请求顺序，选填。默认为 round_robin，可选值有：round_robin，random。当存在多个 API key 时才会生效。round_robin 是轮询负载均衡，random 是随机负载均衡。
+      api_key_schedule_algorithm: round_robin # 设置多个 API Key 的请求顺序，选填。默认为 round_robin，可选值有：round_robin，random，fixed_priority。当存在多个 API key 时才会生效。round_robin 是轮询负载均衡，random 是随机负载均衡，fixed_priority 是固定优先级调度，永远使用第一个可用的 API key。
       model_timeout: # 模型超时时间，单位为秒，默认 100 秒，选填
         gemini-1.5-pro: 10 # 模型 gemini-1.5-pro 的超时时间为 10 秒
         gemini-1.5-flash: 10 # 模型 gemini-1.5-flash 的超时时间为 10 秒
@@ -147,6 +147,7 @@ api_keys:
       - anthropic/claude-3-5-sonnet # 可以使用的模型名称，仅可以使用名为 anthropic 提供商提供的 claude-3-5-sonnet 模型。其他提供商的 claude-3-5-sonnet 模型不可以使用。这种写法不会匹配到other-provider提供的名为anthropic/claude-3-5-sonnet的模型。
       - <anthropic/claude-3-5-sonnet> # 通过在模型名两侧加上尖括号，这样就不会去名为anthropic的渠道下去寻找claude-3-5-sonnet模型，而是将整个 anthropic/claude-3-5-sonnet 作为模型名称。这种写法可以匹配到other-provider提供的名为 anthropic/claude-3-5-sonnet 的模型。但不会匹配到anthropic下面的claude-3-5-sonnet模型。
       - openai-test/text-moderation-latest # 当开启消息道德审查后，可以使用名为 openai-test 渠道下的 text-moderation-latest 模型进行道德审查。
+      - sk-KjjI60Yd0JFWtxxxxxxxxxxxxxxwmRWpWpQRo/* # 支持将其他 api key 当作渠道
     preferences:
       SCHEDULING_ALGORITHM: fixed_priority # 当 SCHEDULING_ALGORITHM 为 fixed_priority 时，使用固定优先级调度，永远执行第一个拥有请求的模型的渠道。默认开启，SCHEDULING_ALGORITHM 缺省值为 fixed_priority。SCHEDULING_ALGORITHM 可选值有：fixed_priority，round_robin，weighted_round_robin, lottery, random。
       # 当 SCHEDULING_ALGORITHM 为 random 时，使用随机轮训负载均衡，随机请求拥有请求的模型的渠道。
@@ -372,8 +373,8 @@ pex -r requirements.txt \
 ## 赞助商
 
 我们感谢以下赞助商的支持：
-<!-- ¥1000 -->
-- @PowerHunter：¥1800
+<!-- ¥2050 -->
+- @PowerHunter：¥2000
 - @ioi：¥50
 
 ## 如何赞助我们
@@ -433,7 +434,7 @@ api_keys:
 
 - 应该怎么正确填写 base_url？
 
-除了高级配置里面所展示的一些特殊的渠道，所有 OpenAI 格式的提供商需要把 base_url 填完整，也就是说 base_url 必须以 /v1/chat/completions 结尾。如果你使用的 GitHub models，base_url 应该填写为 https://models.inference.ai.azure.com/chat/completion，而不是 Azure 的 URL。
+除了高级配置里面所展示的一些特殊的渠道，所有 OpenAI 格式的提供商需要把 base_url 填完整，也就是说 base_url 必须以 /v1/chat/completions 结尾。如果你使用的 GitHub models，base_url 应该填写为 https://models.inference.ai.azure.com/chat/completions，而不是 Azure 的 URL。
 
 - 模型超时时间是如何确认的？渠道级别的超时设置和全局模型超时设置的优先级是什么？
 

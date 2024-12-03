@@ -85,6 +85,7 @@ class RequestModel(BaseRequest):
     temperature: Optional[float] = 0.5
     top_p: Optional[float] = 1.0
     max_tokens: Optional[int] = None
+    max_completion_tokens: Optional[int] = None
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
     n: Optional[int] = 1
@@ -108,6 +109,7 @@ class ImageGenerationRequest(BaseRequest):
     prompt: str
     model: Optional[str] = "dall-e-3"
     n:  Optional[int] = 1
+    response_format: Optional[str] = "url"
     size: Optional[str] = "1024x1024"
     stream: bool = False
 
