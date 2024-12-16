@@ -490,6 +490,8 @@ class StatsMiddleware(BaseHTTPMiddleware):
         if parsed_body:
             try:
                 request_model = UnifiedRequest.model_validate(parsed_body).data
+                if is_debug:
+                    logger.info("request_model: %s", json.dumps(request_model.model_dump(exclude_unset=True), indent=2, ensure_ascii=False))
                 model = request_model.model
                 current_info["model"] = model
 
@@ -549,7 +551,7 @@ class StatsMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
 
-            if request.url.path.startswith("/v1"):
+            if request.url.path.startswith("/v1") and not DISABLE_DATABASE:
                 if isinstance(response, (FastAPIStreamingResponse, StarletteStreamingResponse)) or type(response).__name__ == '_StreamingResponse':
                     response = LoggingStreamingResponse(
                         content=response.body_iterator,
@@ -713,7 +715,7 @@ async def ensure_config(request: Request, call_next):
 
         default_config = {
             "headers": {
-                "User-Agent": "OpenAI/Python 1.55.3",
+                "User-Agent": "curl/7.68.0",
                 "Accept": "*/*",
             },
             "http2": True,
@@ -819,10 +821,12 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
     parsed_url = urlparse(url)
     # print("parsed_url", parsed_url)
     engine = None
-    if parsed_url.path.startswith("/v1beta") or parsed_url.path.endswith("/v1"):
+    if parsed_url.path.endswith("/v1beta") or parsed_url.path.endswith("/v1"):
         engine = "gemini"
     elif parsed_url.netloc == 'aiplatform.googleapis.com':
         engine = "vertex"
+    elif parsed_url.netloc.rstrip('/').endswith('openai.azure.com'):
+        engine = "azure"
     elif parsed_url.netloc == 'api.cloudflare.com':
         engine = "cloudflare"
     elif parsed_url.netloc == 'api.anthropic.com' or parsed_url.path.endswith("v1/messages"):
@@ -840,6 +844,7 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
     and "gpt" not in original_model \
     and "o1" not in original_model \
     and "gemini" not in original_model \
+    and "learnlm" not in original_model \
     and "grok" not in original_model \
     and parsed_url.netloc != 'api.cloudflare.com' \
     and parsed_url.netloc != 'api.cohere.com':
@@ -878,8 +883,8 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
         logger.info(f"provider: {channel_id:<11} model: {request.model:<22} engine: {engine} role: {role}")
 
     url, headers, payload = await get_payload(request, engine, provider)
-    # print("url", url)
     if is_debug:
+        logger.info(url)
         logger.info(json.dumps(headers, indent=4, ensure_ascii=False))
         if payload.get("file"):
             pass
