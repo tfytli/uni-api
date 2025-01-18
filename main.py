@@ -859,7 +859,10 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
     if "gemini" in original_model and engine == "vertex":
         engine = "vertex-gemini"
 
-    if endpoint == "/v1/images/generations":
+    if provider.get("engine"):
+        engine = provider["engine"]
+
+    if endpoint == "/v1/images/generations" or "stable-diffusion" in original_model:
         engine = "dalle"
         request.stream = False
 
@@ -877,9 +880,6 @@ async def process_request(request: Union[RequestModel, ImageGenerationRequest, A
     if endpoint == "/v1/audio/speech":
         engine = "tts"
         request.stream = False
-
-    if provider.get("engine"):
-        engine = provider["engine"]
 
     channel_id = f"{provider['provider']}"
     if engine != "moderation":
@@ -1192,7 +1192,8 @@ class ModelRequestHandler:
                 # 根据异常类型设置状态码和错误消息
                 if isinstance(e, httpx.ReadTimeout):
                     status_code = 504  # Gateway Timeout
-                    error_message = "Request timed out"
+                    timeout_value = e.request.extensions.get('timeout', {}).get('read', -1)
+                    error_message = f"Request timed out after {timeout_value} seconds"
                 elif isinstance(e, httpx.ConnectError):
                     status_code = 503  # Service Unavailable
                     error_message = "Unable to connect to service"
@@ -2151,10 +2152,12 @@ app.mount("/", StaticFiles(directory="./static", html=True), name="static")
 
 if __name__ == '__main__':
     import uvicorn
+    import os
+    PORT = int(os.getenv("PORT", "8000"))
     uvicorn.run(
         "__main__:app",
         host="0.0.0.0",
-        port=8000,
+        port=PORT,
         reload=True,
         reload_dirs=["./"],
         reload_includes=["*.py", "api.yaml"],

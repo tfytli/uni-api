@@ -51,7 +51,7 @@ providers:
   - provider: provider_name # 服务提供商名称, 如 openai、anthropic、gemini、openrouter，随便取名字，必填
     base_url: https://api.your.com/v1/chat/completions # 后端服务的API地址，必填
     api: sk-YgS6GTi0b4bEabc4C # 提供商的API Key，必填，自动使用 base_url 和 api 通过 /v1/models 端点获取可用的所有模型。
-  # 这里可以配置多个提供商，每个提供商可以配置多个 API Key，每个 API Key 可以配置多个模型。
+  # 这里可以配置多个提供商，每个提供商可以配置多个 API Key，每个提供商可以配置多个模型。
 api_keys:
   - api: sk-Pkj60Yf8JFWxfgRmXQFWyGtWUddGZnmi3KlvowmRWpWpQxx # API Key，用户请求 uni-api 需要 API key，必填
   # 该 API Key 可以使用所有模型，即可以使用 providers 下面设置的所有渠道里面的所有模型，不需要一个个添加可用渠道。
@@ -146,7 +146,7 @@ api_keys:
       - gpt-4o # 可以使用的模型名称，可以使用所有提供商提供的 gpt-4o 模型
       - claude-3-5-sonnet # 可以使用的模型名称，可以使用所有提供商提供的 claude-3-5-sonnet 模型
       - gemini/* # 可以使用的模型名称，仅可以使用名为 gemini 提供商提供的所有模型，其中 gemini 是 provider 名称，* 代表所有模型
-    role: admin
+    role: admin # 设置 API key 的别名，选填。请求日志会显示该 API key 的别名。如果 role 为 admin，则仅有此 API key 可以请求 v1/stats,/v1/generate-api-key 端点。如果所有 API key 都没有设置 role 为 admin，则默认第一个 API key 为 admin 拥有请求 v1/stats,/v1/generate-api-key 端点的权限。
 
   - api: sk-pkhf60Yf0JGyJxgRmXqFQyTgWUd9GZnmi3KlvowmRWpWqrhy
     model:
@@ -242,7 +242,7 @@ ssh 登陆到 serv00 服务器，执行下面的命令：
 git clone --depth 1 -b main --quiet https://github.com/yym68686/uni-api.git
 cd uni-api
 python -m venv uni-api
-tmux new -s uni-api
+tmux new -A -s uni-api
 source uni-api/bin/activate
 export CFLAGS="-I/usr/local/include"
 export CXXFLAGS="-I/usr/local/include"
@@ -258,7 +258,7 @@ cpuset -l 0 pip install -r -vv requirements.txt
 ctrl+b d 退出 tmux 等待几个小时安装完成，安装完成后执行下面的命令：
 
 ```bash
-tmux attach -t uni-api
+tmux new -A -s uni-api
 source uni-api/bin/activate
 export CONFIG_URL=http://file_url/api.yaml
 export DISABLE_DATABASE=true

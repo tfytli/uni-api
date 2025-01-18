@@ -32,21 +32,27 @@ async def fetch_gemini_response_stream(client, url, headers, payload, model):
         need_function_call = False
         line_index = 0
         last_text_line = 0
+        is_finish = False
         if "thinking" in model:
             is_thinking = True
         else:
             is_thinking = False
         async for chunk in response.aiter_text():
             buffer += chunk
+
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 line_index += 1
+                if line and '\"finishReason\": \"' in line:
+                    is_finish = True
+                    break
                 # print(line)
                 if line and '\"text\": \"' in line:
                     try:
                         json_data = json.loads( "{" + line + "}")
                         content = json_data.get('text', '')
                         content = "\n".join(content.split("\\n"))
+                        # content = content.replace("\n", "\n\n")
                         if last_text_line == 0 and is_thinking:
                             content = "> " + content.lstrip()
                         if is_thinking:
@@ -68,6 +74,9 @@ async def fetch_gemini_response_stream(client, url, headers, payload, model):
                         continue
 
                     function_full_response += line
+
+            if is_finish:
+                break
 
         if need_function_call:
             function_call = json.loads(function_full_response)

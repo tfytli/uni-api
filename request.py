@@ -8,7 +8,7 @@ from PIL import Image
 import io
 
 from models import RequestModel
-from utils import c35s, c3s, c3o, c3h, gem, BaseAPI, get_model_dict, provider_api_circular_list, safe_get
+from utils import c35s, c3s, c3o, c3h, gemini1, gemini2, BaseAPI, get_model_dict, provider_api_circular_list, safe_get, ThreadSafeCircularList
 
 import imghdr
 
@@ -211,25 +211,29 @@ async def get_gemini_payload(request, engine, provider):
             content[0]["text"] = re.sub(r"_+", "_", content[0]["text"])
             systemInstruction = {"parts": content}
 
+    if "gemini-2.0-flash-exp" in model or "gemini-1.5" in model:
+        safety_settings = "OFF"
+    else:
+        safety_settings = "BLOCK_NONE"
 
     payload = {
         "contents": messages or [{"role": "user", "parts": [{"text": "No messages"}]}],
         "safetySettings": [
             {
                 "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_NONE"
+                "threshold": safety_settings
             },
             {
                 "category": "HARM_CATEGORY_HATE_SPEECH",
-                "threshold": "BLOCK_NONE"
+                "threshold": safety_settings
             },
             {
                 "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_NONE"
+                "threshold": safety_settings
             },
             {
                 "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_NONE"
+                "threshold": safety_settings
             }
         ]
     }
@@ -256,7 +260,8 @@ async def get_gemini_payload(request, engine, provider):
         'user',
         'include_usage',
         'logprobs',
-        'top_logprobs'
+        'top_logprobs',
+        'response_format'
     ]
 
     for field, value in request.model_dump(exclude_unset=True).items():
@@ -371,7 +376,15 @@ async def get_vertex_gemini_payload(request, engine, provider):
     gemini_stream = "streamGenerateContent"
     model_dict = get_model_dict(provider)
     model = model_dict[request.model]
-    location = gem
+    search_tool = None
+
+    if "gemini-2.0" in model or "gemini-exp" in model:
+        location = gemini2
+        search_tool = {"googleSearch": {}}
+    else:
+        location = gemini1
+        search_tool = {"googleSearchRetrieval": {}}
+
     url = "https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{LOCATION}/publishers/google/models/{MODEL_ID}:{stream}".format(LOCATION=await location.next(), PROJECT_ID=project_id, MODEL_ID=model, stream=gemini_stream)
 
     messages = []
@@ -478,7 +491,6 @@ async def get_vertex_gemini_payload(request, engine, provider):
         'logprobs',
         'top_logprobs'
     ]
-
     for field, value in request.model_dump(exclude_unset=True).items():
         if field not in miss_fields and value is not None:
             if field == "tools":
@@ -497,13 +509,9 @@ async def get_vertex_gemini_payload(request, engine, provider):
 
     if request.model.endswith("-search"):
         if "tools" not in payload:
-            payload["tools"] = [{
-                "googleSearchRetrieval": {}
-            }]
+            payload["tools"] = [search_tool]
         else:
-            payload["tools"].append({
-                "googleSearchRetrieval": {}
-            })
+            payload["tools"].append(search_tool)
 
     return url, headers, payload
 
@@ -665,10 +673,7 @@ async def get_gpt_payload(request, engine, provider):
     model_dict = get_model_dict(provider)
     model = model_dict[request.model]
     if provider.get("api"):
-        if provider['base_url'] == "https://api-ext.felo.ai/one-ai/completions" or provider['base_url'] == "https://api-ext.felo.ai/trail/v1/chat/completions":
-            headers['Authorization'] = f"{await provider_api_circular_list[provider['provider']].next(model)}"
-        else:
-            headers['Authorization'] = f"Bearer {await provider_api_circular_list[provider['provider']].next(model)}"
+        headers['Authorization'] = f"Bearer {await provider_api_circular_list[provider['provider']].next(model)}"
 
     elif provider['provider'].startswith("sk-"):
         headers['Authorization'] = f"Bearer {provider['provider']}"
@@ -711,6 +716,10 @@ async def get_gpt_payload(request, engine, provider):
                 messages.append({"role": msg.role, "tool_call_id": tool_call_id, "content": content})
         else:
             messages.append({"role": msg.role, "content": content})
+
+    if ("o1-mini" in model or "o1-preview" in model) and len(messages) > 1 and messages[0]["role"] == "system":
+        system_msg = messages.pop(0)
+        messages[0]["content"] = system_msg["content"] + messages[0]["content"]
 
     payload = {
         "model": model,

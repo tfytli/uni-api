@@ -6,16 +6,21 @@ from log_config import logger
 class FunctionParameter(BaseModel):
     type: str
     properties: Dict[str, Dict[str, Any]]
-    required: List[str]
+    required: List[str] = None
 
 class Function(BaseModel):
     name: str
-    description: str
+    description: str = Field(default=None)
     parameters: Optional[FunctionParameter] = Field(default=None, exclude=None)
 
 class Tool(BaseModel):
     type: str
     function: Function
+
+    @classmethod
+    def parse_raw(cls, json_str: str) -> 'Tool':
+        """从JSON字符串解析Tool对象"""
+        return cls.model_validate_json(json_str)
 
 class FunctionCall(BaseModel):
     name: str
@@ -104,6 +109,23 @@ class RequestModel(BaseRequest):
                             return item.text
         return ""
 
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+
+        # 检查并处理 tools 字段
+        if 'tools' in data and data['tools']:
+            for tool in data['tools']:
+                if 'function' in tool:
+                    function_data = tool['function']
+                    # 如果 parameters 为空或没有 properties，则移除
+                    if 'parameters' in function_data and (
+                        function_data['parameters'] is None or
+                        not function_data['parameters'].get('properties')
+                    ):
+                        function_data.pop('parameters', None)
+
+        return data
+
 class ImageGenerationRequest(BaseRequest):
     prompt: str
     model: Optional[str] = "dall-e-3"
@@ -174,3 +196,25 @@ class UnifiedRequest(BaseModel):
             else:
                 raise ValueError("无法确定请求类型")
         return values
+
+if __name__ == "__main__":
+    # 示例JSON字符串
+    json_str = '''
+    {
+        "type": "function",
+        "function": {
+            "name": "clock-time____getCurrentTime____standalone",
+            "description": "获取当前时间",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    }
+    '''
+
+    # 解析JSON字符串为Tool对象
+    tool = Tool.parse_raw(json_str)
+
+    # parameters 字段将被自动排除
+    print(tool.model_dump(exclude_unset=True))

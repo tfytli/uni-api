@@ -51,7 +51,7 @@ providers:
   - provider: provider_name # Service provider name, such as openai, anthropic, gemini, openrouter, can be any name, required
     base_url: https://api.your.com/v1/chat/completions # Backend service API address, required
     api: sk-YgS6GTi0b4bEabc4C # Provider's API Key, required, automatically uses base_url and api to get all available models through the /v1/models endpoint.
-  # Multiple providers can be configured here, each provider can configure multiple API Keys, and each API Key can configure multiple models.
+  # Multiple providers can be configured here, each provider can configure multiple API Keys, and each provider can configure multiple models.
 api_keys:
   - api: sk-Pkj60Yf8JFWxfgRmXQFWyGtWUddGZnmi3KlvowmRWpWpQxx # API Key, user request uni-api requires API key, required
   # This API Key can use all models, that is, it can use all models in all channels set under providers, without needing to add available channels one by one.
@@ -146,7 +146,7 @@ api_keys:
       - gpt-4o # Usable model name, can use all gpt-4o models provided by providers
       - claude-3-5-sonnet # Usable model name, can use all claude-3-5-sonnet models provided by providers
       - gemini/* # Usable model name, can only use all models provided by providers named gemini, where gemini is the provider name, * represents all models
-    role: admin
+    role: admin # Set the alias of the API key, optional. The request log will display the alias of the API key. If role is admin, only this API key can request the v1/stats,/v1/generate-api-key endpoints. If all API keys do not have role set to admin, the first API key is set as admin and has permission to request the v1/stats,/v1/generate-api-key endpoints.
 
   - api: sk-pkhf60Yf0JGyJxgRmXqFQyTgWUd9GZnmi3KlvowmRWpWqrhy
     model:
@@ -242,7 +242,7 @@ ssh login to the serv00 server, execute the following command:
 git clone --depth 1 -b main --quiet https://github.com/yym68686/uni-api.git
 cd uni-api
 python -m venv uni-api
-tmux new -s uni-api
+tmux new -A -s uni-api
 source uni-api/bin/activate
 export CFLAGS="-I/usr/local/include"
 export CXXFLAGS="-I/usr/local/include"
@@ -258,7 +258,7 @@ cpuset -l 0 pip install -r -vv requirements.txt
 ctrl+b d to exit tmux, wait a few hours for the installation to complete, and after the installation is complete, execute the following command:
 
 ```bash
-tmux attach -t uni-api
+tmux new -A -s uni-api
 source uni-api/bin/activate
 export CONFIG_URL=http://file_url/api.yaml
 export DISABLE_DATABASE=true
