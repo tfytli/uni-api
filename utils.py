@@ -691,6 +691,8 @@ def safe_get(data, *keys, default=None):
             data = data[key] if isinstance(data, (dict, list)) else data.get(key)
         except (KeyError, IndexError, AttributeError, TypeError):
             return default
+    if not data:
+        return default
     return data
 
 
@@ -703,9 +705,14 @@ end_of_line = "\n\n"
 
 import random
 import string
-async def generate_sse_response(timestamp, model, content=None, tools_id=None, function_call_name=None, function_call_content=None, role=None, total_tokens=0, prompt_tokens=0, completion_tokens=0):
+async def generate_sse_response(timestamp, model, content=None, tools_id=None, function_call_name=None, function_call_content=None, role=None, total_tokens=0, prompt_tokens=0, completion_tokens=0, reasoning_content=None):
     random.seed(timestamp)
     random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=29))
+
+    delta_content = {"role": "assistant", "content": content} if content else {}
+    if reasoning_content:
+        delta_content = {"role": "assistant", "content": "", "reasoning_content": reasoning_content}
+
     sample_data = {
         "id": f"chatcmpl-{random_str}",
         "object": "chat.completion.chunk",
@@ -714,7 +721,7 @@ async def generate_sse_response(timestamp, model, content=None, tools_id=None, f
         "choices": [
             {
                 "index": 0,
-                "delta": {"content": content} if content else {},
+                "delta": delta_content,
                 "logprobs": None,
                 "finish_reason": None if content else "stop"
             }
@@ -791,6 +798,7 @@ def get_engine(provider, endpoint=None, original_model=""):
     else:
         engine = "gpt"
 
+    original_model = original_model.lower()
     if original_model \
     and "claude" not in original_model \
     and "gpt" not in original_model \
