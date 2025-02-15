@@ -718,6 +718,8 @@ async def get_gpt_payload(request, engine, provider):
                     content.append(image_message)
         else:
             content = msg.content
+            if msg.role == "system" and "o3-mini" in model and not content.startswith("Formatting re-enabled"):
+                content = "Formatting re-enabled. " + content
             tool_calls = msg.tool_calls
             tool_call_id = msg.tool_call_id
 
@@ -764,7 +766,7 @@ async def get_gpt_payload(request, engine, provider):
     if provider.get("tools") == False or "o1" in model or "chatgpt-4o-latest" in model or "grok" in model:
         payload.pop("tools", None)
         payload.pop("tool_choice", None)
-    if "o1" in model and "models.inference.ai.azure.com" in url:
+    if "models.inference.ai.azure.com" in url:
         payload["stream"] = False
         # request.stream = False
         payload.pop("stream_options", None)
@@ -780,6 +782,10 @@ async def get_gpt_payload(request, engine, provider):
     if "o3-mini" in model or "o1" in model:
         if "temperature" in payload:
             payload.pop("temperature")
+
+    if "deepseek-r" in model.lower():
+        if "temperature" not in payload:
+            payload["temperature"] = 0.6
 
     if request.model.endswith("-search") and "gemini" in request.model:
         if "tools" not in payload:
@@ -805,15 +811,17 @@ async def get_gpt_payload(request, engine, provider):
 def build_azure_endpoint(base_url, deployment_id, api_version="2024-10-21"):
     # 移除base_url末尾的斜杠(如果有)
     base_url = base_url.rstrip('/')
+    final_url = base_url
 
-    # 构建路径
-    path = f"/openai/deployments/{deployment_id}/chat/completions"
+    if "models/chat/completions" not in final_url:
+        # 构建路径
+        path = f"/openai/deployments/{deployment_id}/chat/completions"
+        # 使用urljoin拼接base_url和path
+        final_url = urllib.parse.urljoin(base_url, path)
 
-    # 使用urljoin拼接base_url和path
-    full_url = urllib.parse.urljoin(base_url, path)
-
-    # 添加api-version查询参数
-    final_url = f"{full_url}?api-version={api_version}"
+    if "?api-version=" not in final_url:
+        # 添加api-version查询参数
+        final_url = f"{final_url}?api-version={api_version}"
 
     return final_url
 

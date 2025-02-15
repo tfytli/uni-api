@@ -207,6 +207,9 @@ async def fetch_gpt_response_stream(client, url, headers, payload):
 
 async def fetch_azure_response_stream(client, url, headers, payload):
     timestamp = int(datetime.timestamp(datetime.now()))
+    is_thinking = False
+    has_send_thinking = False
+    ark_tag = False
     async with client.stream('POST', url, headers=headers, json=payload) as response:
         error_message = await check_response(response, "fetch_azure_response_stream")
         if error_message:
@@ -226,10 +229,30 @@ async def fetch_azure_response_stream(client, url, headers, payload):
                         yield "data: [DONE]" + end_of_line
                         return
                     line = json.loads(result)
-                    no_stream_content = safe_get(line, "choices", 0, "message", "content", default=None)
-                    stream_content = safe_get(line, "choices", 0, "delta", "content", default=None)
-                    if no_stream_content or stream_content or sse_string:
-                        sse_string = await generate_sse_response(timestamp, safe_get(line, "model", default=None), content=no_stream_content or stream_content)
+                    no_stream_content = safe_get(line, "choices", 0, "message", "content", default="")
+                    content = safe_get(line, "choices", 0, "delta", "content", default="")
+
+                    # 处理 <think> 标签
+                    if "<think>" in content:
+                        is_thinking = True
+                        ark_tag = True
+                        content = content.replace("<think>", "")
+                    if "</think>" in content:
+                        is_thinking = False
+                        content = content.replace("</think>", "")
+                        if not content:
+                            continue
+                    if is_thinking and ark_tag:
+                        if not has_send_thinking:
+                            content = content.replace("\n\n", "")
+                        if content:
+                            sse_string = await generate_sse_response(timestamp, payload["model"], reasoning_content=content)
+                            yield sse_string
+                            has_send_thinking = True
+                        continue
+
+                    if no_stream_content or content or sse_string:
+                        sse_string = await generate_sse_response(timestamp, safe_get(line, "model", default=None), content=no_stream_content or content)
                         yield sse_string
                     if no_stream_content:
                         yield "data: [DONE]" + end_of_line
@@ -370,7 +393,7 @@ async def fetch_response(client, url, headers, payload, engine, model):
         else:
             logger.error(f"error fetch_response: Unknown response_json type: {type(response_json)}")
             parsed_data = response_json
-
+        # print("parsed_data", json.dumps(parsed_data, indent=4, ensure_ascii=False))
         content = ""
         for item in parsed_data:
             chunk = safe_get(item, "candidates", 0, "content", "parts", 0, "text")
@@ -390,8 +413,11 @@ async def fetch_response(client, url, headers, payload, engine, model):
             logger.error(f"Unknown role: {role}")
             role = "assistant"
 
+        function_call_name = safe_get(parsed_data, -1, "candidates", 0, "content", "parts", 0, "functionCall", "name", default=None)
+        function_call_content = safe_get(parsed_data, -1, "candidates", 0, "content", "parts", 0, "functionCall", "args", default=None)
+
         timestamp = int(datetime.timestamp(datetime.now()))
-        yield await generate_no_stream_response(timestamp, model, content=content, tools_id=None, function_call_name=None, function_call_content=None, role=role, total_tokens=total_tokens, prompt_tokens=prompt_tokens, completion_tokens=candidates_tokens)
+        yield await generate_no_stream_response(timestamp, model, content=content, tools_id=None, function_call_name=function_call_name, function_call_content=function_call_content, role=role, total_tokens=total_tokens, prompt_tokens=prompt_tokens, completion_tokens=candidates_tokens)
 
     elif engine == "claude":
         response_json = response.json()
