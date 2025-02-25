@@ -171,8 +171,10 @@ async def fetch_gpt_response_stream(client, url, headers, payload):
                     if "</think>" in content:
                         is_thinking = False
                         content = content.replace("</think>", "")
-                        if not content:
-                            continue
+                        if content:
+                            sse_string = await generate_sse_response(timestamp, payload["model"], reasoning_content=content)
+                            yield sse_string
+                        continue
                     if is_thinking and ark_tag:
                         if not has_send_thinking:
                             content = content.replace("\n\n", "")
@@ -199,10 +201,12 @@ async def fetch_gpt_response_stream(client, url, headers, payload):
                         continue
 
                     no_stream_content = safe_get(line, "choices", 0, "message", "content", default=None)
-                    if no_stream_content:
+                    if no_stream_content and has_send_thinking == False:
                         sse_string = await generate_sse_response(safe_get(line, "created", default=None), safe_get(line, "model", default=None), content=no_stream_content)
                         yield sse_string
                     else:
+                        if no_stream_content:
+                            del line["choices"][0]["message"]
                         yield "data: " + json.dumps(line).strip() + end_of_line
 
 async def fetch_azure_response_stream(client, url, headers, payload):
@@ -359,6 +363,10 @@ async def fetch_claude_response_stream(client, url, headers, payload, model):
                     if "text" in delta:
                         content = delta["text"]
                         sse_string = await generate_sse_response(timestamp, model, content, None, None)
+                        yield sse_string
+                    if "thinking" in delta and delta["thinking"]:
+                        content = delta["thinking"]
+                        sse_string = await generate_sse_response(timestamp, model, reasoning_content=content)
                         yield sse_string
                     if "partial_json" in delta:
                         # {"type":"input_json_delta","partial_json":""}

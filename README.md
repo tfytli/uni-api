@@ -75,7 +75,8 @@ providers:
       - sk-ant-api03-bNnAOJyA-xQw_twAA
       - sk-ant-api02-bNnxxxx
     model:
-      - claude-3-5-sonnet-20240620: claude-3-5-sonnet # Rename model, claude-3-5-sonnet-20240620 is the provider's model name, claude-3-5-sonnet is the renamed name, you can use a simple name to replace the original complex name, optional
+      - claude-3-7-sonnet-20240620: claude-3-7-sonnet # Rename model, claude-3-7-sonnet-20240620 is the provider's model name, claude-3-7-sonnet is the renamed name, you can use a simple name to replace the original complex name, optional
+      - claude-3-7-sonnet-20250219: claude-3-7-sonnet-think # Rename model, claude-3-7-sonnet-20250219 is the provider's model name, claude-3-7-sonnet-think is the renamed name, if "think" is in the renamed name, it will be automatically converted to claude think model, default think token limit is 4096. Optional
     tools: true # Whether to support tools, such as generating code, generating documents, etc., default is true, optional
 
   - provider: gemini
@@ -102,6 +103,9 @@ providers:
         gemini-1.5-flash: 10 # Model gemini-1.5-flash timeout is 10 seconds
         default: 10 # Model does not have a timeout set, use the default timeout of 10 seconds, when requesting a model not in model_timeout, the timeout is also 10 seconds, if default is not set, uni-api will use the default timeout set by the environment variable TIMEOUT, the default timeout is 100 seconds
       proxy: socks5://[username]:[password]@[ip]:[port] # Proxy address, optional. Supports socks5 and http proxies, default is not used.
+      headers:  # Add custom http request headers, optional
+        Custom-Header-1: Value-1
+        Custom-Header-2: Value-2
 
   - provider: vertex
     project_id: gen-lang-client-xxxxxxxxxxxxxx # Description: Your Google Cloud project ID. Format: String, usually composed of lowercase letters, numbers, and hyphens. How to obtain: You can find your project ID in the project selector of the Google Cloud Console.

@@ -75,7 +75,8 @@ providers:
       - sk-ant-api03-bNnAOJyA-xQw_twAA
       - sk-ant-api02-bNnxxxx
     model:
-      - claude-3-5-sonnet-20240620: claude-3-5-sonnet # 重命名模型，claude-3-5-sonnet-20240620 是服务商的模型名称，claude-3-5-sonnet 是重命名后的名字，可以使用简洁的名字代替原来复杂的名称，选填
+      - claude-3-7-sonnet-20240620: claude-3-7-sonnet # 重命名模型，claude-3-7-sonnet-20240620 是服务商的模型名称，claude-3-7-sonnet 是重命名后的名字，可以使用简洁的名字代替原来复杂的名称，选填
+      - claude-3-7-sonnet-20250219: claude-3-7-sonnet-think # 重命名模型，claude-3-7-sonnet-20250219 是服务商的模型名称，claude-3-7-sonnet-think 是重命名后的名字，可以使用简洁的名字代替原来复杂的名称，如果重命名后的名字里面有think，则自动转换为 claude 思考模型，默认思考 token 限制为 4096。选填
     tools: true # 是否支持工具，如生成代码、生成文档等，默认是 true，选填
 
   - provider: gemini
@@ -102,6 +103,9 @@ providers:
         gemini-1.5-flash: 10 # 模型 gemini-1.5-flash 的超时时间为 10 秒
         default: 10 # 模型没有设置超时时间，使用默认的超时时间 10 秒，当请求的不在 model_timeout 里面的模型时，超时时间默认是 10 秒，不设置 default，uni-api 会使用全局配置的模型超时时间。
       proxy: socks5://[用户名]:[密码]@[IP地址]:[端口] # 代理地址，选填。支持 socks5 和 http 代理，默认不使用代理。
+      headers:  # 额外附加自定义HTTP请求头，选填。
+        Custom-Header-1: Value-1
+        Custom-Header-2: Value-2
 
   - provider: vertex
     project_id: gen-lang-client-xxxxxxxxxxxxxx #    描述： 您的Google Cloud项目ID。格式： 字符串，通常由小写字母、数字和连字符组成。获取方式： 在Google Cloud Console的项目选择器中可以找到您的项目ID。
